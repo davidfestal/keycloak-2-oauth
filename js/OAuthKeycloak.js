@@ -5,6 +5,25 @@
             return new Keycloak(config);
         }
 
+        config.clientId = "740650a2-9c44-4db5-b067-a3d1b2cd2d01";
+        config.openidConnectEndpoint = {
+            authorize: function() {
+                return 'https://auth.openshift.io/api/authorize';
+            },
+            retrieveToken: function() {
+                return 'https://auth.openshift.io/api/token';
+            },
+            refreshToken: function() {
+                return 'https://auth.openshift.io/api/token/refresh';
+            },
+            logout: function() {
+                return 'https://auth.openshift.io/api/logout';
+            },
+            register: function() {
+                throw 'Not supported';
+            }
+        }
+
         var kc = this;
         var adapter;
         var refreshQueue = [];
@@ -206,15 +225,16 @@
 
             callbackStorage.add(callbackState);
 
-            var action = 'auth';
+            var baseUrl;
             if (options && options.action == 'register') {
-                action = 'registrations';
+                baseUrl = kc.openidConnectEndpoint.register();
+            } else {
+                baseUrl = kc.openidConnectEndpoint.authorize();
             }
 
             var scope = (options && options.scope) ? "openid " + options.scope : "openid";
 
-            var url = getRealmUrl()
-                + '/protocol/openid-connect/' + action
+            var url = baseUrl
                 + '?client_id=' + encodeURIComponent(kc.clientId)
                 + '&redirect_uri=' + encodeURIComponent(redirectUri)
                 + '&state=' + encodeURIComponent(state)
@@ -251,8 +271,7 @@
         }
 
         kc.createLogoutUrl = function(options) {
-            var url = getRealmUrl()
-                + '/protocol/openid-connect/logout'
+            var url = kc.openidConnectEndpoint.logout()
                 + '?redirect_uri=' + encodeURIComponent(adapter.redirectUri(options, false));
 
             return url;
@@ -388,7 +407,7 @@
                     promise.setSuccess(false);
                 } else {
                     var params = 'grant_type=refresh_token&' + 'refresh_token=' + kc.refreshToken;
-                    var url = getRealmUrl() + '/protocol/openid-connect/token';
+                    var url = kc.openidConnectEndpoint.refreshToken();
 
                     refreshQueue.push(promise);
 
@@ -499,7 +518,7 @@
 
             if ((kc.flow != 'implicit') && code) {
                 var params = 'code=' + code + '&grant_type=authorization_code';
-                var url = getRealmUrl() + '/protocol/openid-connect/token';
+                var url = kc.openidConnectEndpoint.retrieveToken();
 
                 var req = new XMLHttpRequest();
                 req.open('POST', url, true);
@@ -536,9 +555,9 @@
 
                 setToken(accessToken, refreshToken, idToken, timeLocal);
 
-                if ((kc.tokenParsed && kc.tokenParsed.nonce != oauth.storedNonce) ||
+                if (false && ((kc.tokenParsed && kc.tokenParsed.nonce != oauth.storedNonce) ||
                     (kc.refreshTokenParsed && kc.refreshTokenParsed.nonce != oauth.storedNonce) ||
-                    (kc.idTokenParsed && kc.idTokenParsed.nonce != oauth.storedNonce)) {
+                    (kc.idTokenParsed && kc.idTokenParsed.nonce != oauth.storedNonce))) {
 
                     console.info('[KEYCLOAK] Invalid nonce, clearing token');
                     kc.clearToken();
@@ -563,6 +582,30 @@
                 configUrl = config;
             }
 
+            function setupOidcEndoints(config) {
+                if (! config.openidConnectEndpoint) {
+                    kc.openidConnectEndpoint = {
+                        authorize: function() {
+                            return getRealmUrl() + '/protocol/openid-connect/auth';
+                        },
+                        retrieveToken: function() {
+                            return getRealmUrl() + '/protocol/openid-connect/token';
+                        },
+                        refreshToken: function() {
+                            return getRealmUrl() + '/protocol/openid-connect/token';
+                        },
+                        logout: function() {
+                            return getRealmUrl() + '/protocol/openid-connect/logout';
+                        },
+                        register: function() {
+                            return getRealmUrl() + '/protocol/openid-connect/registrations';
+                        }
+                    };
+                } else {
+                    kc.openidConnectEndpoint = config.openidConnectEndpoint;
+                }
+            }
+
             if (configUrl) {
                 var req = new XMLHttpRequest();
                 req.open('GET', configUrl, true);
@@ -577,7 +620,7 @@
                             kc.realm = config['realm'];
                             kc.clientId = config['resource'];
                             kc.clientSecret = (config['credentials'] || {})['secret'];
-
+                            setupOidcEndoints(config);
                             promise.setSuccess();
                         } else {
                             promise.setError();
@@ -609,6 +652,7 @@
                 kc.realm = config.realm;
                 kc.clientId = config.clientId;
                 kc.clientSecret = (config.credentials || {}).secret;
+                setupOidcEndoints(config);
 
                 promise.setSuccess();
             }
