@@ -11,14 +11,14 @@ import keycloak_2_oauth.common {
 }
 
 "Run the module `openshift_client_javascript`."
-shared void run(Boolean useOauth) {
+shared void run(Boolean useFabric8Auth) {
     assert (exists root = document.body);
     
     value script = document.createElement("script");
     dynamic {
         dynamic dynaScript = script;
         dynaScript.async = true;
-        dynaScript.src = if (useOauth) then "OAuthKeycloak.js" else "``authServerUrl``/js/keycloak.js";
+        dynaScript.src = if (useFabric8Auth) then "OAuthKeycloak.js" else "``authServerUrl``/js/keycloak.js";
     }
     script.addEventListener("error", object satisfies EventListener { 
         shared actual void handleEvent(Event event) {
@@ -33,10 +33,20 @@ shared void run(Boolean useOauth) {
     script.addEventListener("load", object satisfies EventListener { 
         shared actual void handleEvent(Event event) {
             dynamic {
-                dynamic keycloak = Keycloak(dynamic [
+                dynamic keycloak = Keycloak(
+                    if (useFabric8Auth)
+                    then dynamic [
                         url=authServerUrl;
                         realm=realm;
-                        clientId=clientId;
+                        clientId=clientId(useFabric8Auth);
+                    ]
+                    else dynamic [
+                        oidcProvider = dynamic [
+                            authorization_endpoint = "https://auth.openshift.io/api/authorize";
+                            token_endpoint = "https://auth.openshift.io/api/token";
+                            end_session_endpoint = "https://auth.openshift.io/api/logout";
+                        ];
+                        clientId=clientId(useFabric8Auth);
                     ]);
                 keycloak.init(dynamic [
                         onLoad="login-required";

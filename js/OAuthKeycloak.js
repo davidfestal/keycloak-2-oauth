@@ -5,16 +5,12 @@
             return new Keycloak(config);
         }
 
-        config.clientId = "740650a2-9c44-4db5-b067-a3d1b2cd2d01";
-        config.openidConnectEndpoint = {
+        config.endpoints = {
             authorize: function() {
                 return 'https://auth.openshift.io/api/authorize';
             },
-            retrieveToken: function() {
+            token: function() {
                 return 'https://auth.openshift.io/api/token';
-            },
-            refreshToken: function() {
-                return 'https://auth.openshift.io/api/token/refresh';
             },
             logout: function() {
                 return 'https://auth.openshift.io/api/logout';
@@ -227,9 +223,9 @@
 
             var baseUrl;
             if (options && options.action == 'register') {
-                baseUrl = kc.openidConnectEndpoint.register();
+                baseUrl = kc.endpoints.register();
             } else {
-                baseUrl = kc.openidConnectEndpoint.authorize();
+                baseUrl = kc.endpoints.authorize();
             }
 
             var scope = (options && options.scope) ? "openid " + options.scope : "openid";
@@ -271,7 +267,7 @@
         }
 
         kc.createLogoutUrl = function(options) {
-            var url = kc.openidConnectEndpoint.logout()
+            var url = kc.endpoints.logout()
                 + '?redirect_uri=' + encodeURIComponent(adapter.redirectUri(options, false));
 
             return url;
@@ -407,7 +403,7 @@
                     promise.setSuccess(false);
                 } else {
                     var params = 'grant_type=refresh_token&' + 'refresh_token=' + kc.refreshToken;
-                    var url = kc.openidConnectEndpoint.refreshToken();
+                    var url = kc.endpoints.token();
 
                     refreshQueue.push(promise);
 
@@ -518,7 +514,7 @@
 
             if ((kc.flow != 'implicit') && code) {
                 var params = 'code=' + code + '&grant_type=authorization_code';
-                var url = kc.openidConnectEndpoint.retrieveToken();
+                var url = kc.endpoints.token();
 
                 var req = new XMLHttpRequest();
                 req.open('POST', url, true);
@@ -582,27 +578,46 @@
                 configUrl = config;
             }
 
-            function setupOidcEndoints(config) {
-                if (! config.openidConnectEndpoint) {
-                    kc.openidConnectEndpoint = {
+            function setupOidcEndoints(oidcConfiguration) {
+                if (! oidcConfiguration) {
+                    kc.endpoints = {
                         authorize: function() {
                             return getRealmUrl() + '/protocol/openid-connect/auth';
                         },
-                        retrieveToken: function() {
-                            return getRealmUrl() + '/protocol/openid-connect/token';
-                        },
-                        refreshToken: function() {
+                        token: function() {
                             return getRealmUrl() + '/protocol/openid-connect/token';
                         },
                         logout: function() {
                             return getRealmUrl() + '/protocol/openid-connect/logout';
+                        },
+                        checkSessionIframe: function() {
+                            return  getRealmUrl() + '/protocol/openid-connect/login-status-iframe.html';
                         },
                         register: function() {
                             return getRealmUrl() + '/protocol/openid-connect/registrations';
                         }
                     };
                 } else {
-                    kc.openidConnectEndpoint = config.openidConnectEndpoint;
+                    config.endpoints = {
+                        authorize: function() {
+                            return oidcConfiguration.authorization_endpoint;
+                        },
+                        token: function() {
+                            return oidcConfiguration.token_endpoint;
+                        },
+                        logout: function() {
+                            return oidcConfiguration.end_session_endpoint;
+                        },
+                        checkSessionIframe: function() {
+                            if (!oidcConfiguration.check_session_iframe) {
+                                throw "Not supported by the OIDC server";
+                            }
+                            return oidcConfiguration.check_session_iframe;
+                        },
+                        register: function() {
+                            throw 'Redirection to "Register user" page not supported in standard OIDC mode';
+                        }
+                    }
                 }
             }
 
@@ -620,7 +635,7 @@
                             kc.realm = config['realm'];
                             kc.clientId = config['resource'];
                             kc.clientSecret = (config['credentials'] || {})['secret'];
-                            setupOidcEndoints(config);
+                            setupOidcEndoints(null);
                             promise.setSuccess();
                         } else {
                             promise.setError();
@@ -630,31 +645,60 @@
 
                 req.send();
             } else {
-                if (!config['url']) {
-                    var scripts = document.getElementsByTagName('script');
-                    for (var i = 0; i < scripts.length; i++) {
-                        if (scripts[i].src.match(/.*keycloak\.js/)) {
-                            config.url = scripts[i].src.substr(0, scripts[i].src.indexOf('/js/keycloak.js'));
-                            break;
-                        }
-                    }
-                }
-
-                if (!config.realm) {
-                    throw 'realm missing';
-                }
-
                 if (!config.clientId) {
                     throw 'clientId missing';
                 }
 
-                kc.authServerUrl = config.url;
-                kc.realm = config.realm;
                 kc.clientId = config.clientId;
                 kc.clientSecret = (config.credentials || {}).secret;
-                setupOidcEndoints(config);
 
-                promise.setSuccess();
+                var oidcProvider = config['oidcProvider'];
+                if (!oidcProvider) {
+                    if (!config['url']) {
+                        var scripts = document.getElementsByTagName('script');
+                        for (var i = 0; i < scripts.length; i++) {
+                            if (scripts[i].src.match(/.*keycloak\.js/)) {
+                                config.url = scripts[i].src.substr(0, scripts[i].src.indexOf('/js/keycloak.js'));
+                                break;
+                            }
+                        }
+                    }
+                    if (!config.realm) {
+                        throw 'realm missing';
+                    }
+
+                    kc.authServerUrl = config.url;
+                    kc.realm = config.realm;
+                    setupOidcEndoints(null);
+                    promise.setSuccess();
+                } else {
+                    if (typeof oidcProvider === 'string') {
+                        if (oidcProvider.charAt(oidcProvider.length - 1) == '/') {
+                            return oidcProvider + '/.well-known/openid-configuration';
+                        } else {
+                            return oidcProvider + '.well-known/openid-configuration';
+                        }
+                        var req = new XMLHttpRequest();
+                        req.open('GET', configUrl, true);
+                        req.setRequestHeader('Accept', 'application/json');
+
+                        req.onreadystatechange = function () {
+                            if (req.readyState == 4) {
+                                if (req.status == 200 || fileLoaded(req)) {
+                                    var oidcProviderConfig = JSON.parse(req.responseText);
+                                    setupOidcEndoints(oidcProviderConfig);
+                                    promise.setSuccess();
+                                } else {
+                                    promise.setError();
+                                }
+                            }
+                        };
+
+                        req.send();
+                    } else {
+                        setupOidcEndoints(oidcProvider);
+                    }
+                }
             }
 
             return promise.promise;
@@ -846,18 +890,18 @@
             loginIframe.iframe = iframe;
 
             iframe.onload = function() {
-                var realmUrl = getRealmUrl();
-                if (realmUrl.charAt(0) === '/') {
+                var authUrl = kc.authorize();
+                if (authUrl.charAt(0) === '/') {
                     loginIframe.iframeOrigin = getOrigin();
                 } else {
-                    loginIframe.iframeOrigin = realmUrl.substring(0, realmUrl.indexOf('/', 8));
+                    loginIframe.iframeOrigin = authUrl.substring(0, authUrl.indexOf('/', 8));
                 }
                 promise.setSuccess();
 
                 setTimeout(check, loginIframe.interval * 1000);
             }
 
-            var src = getRealmUrl() + '/protocol/openid-connect/login-status-iframe.html';
+            var src = kc.checkSessionIframe();
             iframe.setAttribute('src', src );
             iframe.style.display = 'none';
             document.body.appendChild(iframe);
