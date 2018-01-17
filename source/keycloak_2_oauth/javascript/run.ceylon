@@ -39,9 +39,10 @@ shared void run(Boolean useOauth) {
                         clientId=clientId;
                     ]);
                 keycloak.init(dynamic [
-                    onLoad="login-required";
-                    checkLoginIframe=false;
-                ]).success(() {
+                        onLoad="login-required";
+                        checkLoginIframe=false;
+                        responseMode = "query";
+                    ]).success(() {
                     eval("window")._keycloak = keycloak;
                     void doWithUpdatedKeycloak(void action(String updatedToken)) {
                         keycloak.updateToken(5).success(() {
