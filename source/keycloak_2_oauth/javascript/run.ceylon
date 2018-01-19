@@ -18,7 +18,7 @@ shared void run(Boolean useFabric8Auth) {
     dynamic {
         dynamic dynaScript = script;
         dynaScript.async = true;
-        dynaScript.src = if (useFabric8Auth) then "OAuthKeycloak.js" else "``authServerUrl``/js/keycloak.js";
+        dynaScript.src = if (useFabric8Auth) then "OIDCKeycloak.js" else "``authServerUrl``/js/keycloak.js";
     }
     script.addEventListener("error", object satisfies EventListener { 
         shared actual void handleEvent(Event event) {
@@ -34,24 +34,21 @@ shared void run(Boolean useFabric8Auth) {
         shared actual void handleEvent(Event event) {
             dynamic {
                 dynamic keycloak = Keycloak(
-                    if (useFabric8Auth)
+                    if (!useFabric8Auth)
                     then dynamic [
                         url=authServerUrl;
                         realm=realm;
                         clientId=clientId(useFabric8Auth);
                     ]
                     else dynamic [
-                        oidcProvider = dynamic [
-                            authorization_endpoint = "https://auth.openshift.io/api/authorize";
-                            token_endpoint = "https://auth.openshift.io/api/token";
-                            end_session_endpoint = "https://auth.openshift.io/api/logout";
-                        ];
+                        oidcProvider = "http://localhost:8089/api";
                         clientId=clientId(useFabric8Auth);
                     ]);
                 keycloak.init(dynamic [
                         onLoad="login-required";
                         checkLoginIframe=false;
                         responseMode = "query";
+                        useNonce=!useFabric8Auth;
                     ]).success(() {
                     eval("window")._keycloak = keycloak;
                     void doWithUpdatedKeycloak(void action(String updatedToken)) {

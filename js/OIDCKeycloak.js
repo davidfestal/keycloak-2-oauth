@@ -5,21 +5,6 @@
             return new Keycloak(config);
         }
 
-        config.endpoints = {
-            authorize: function() {
-                return 'https://auth.openshift.io/api/authorize';
-            },
-            token: function() {
-                return 'https://auth.openshift.io/api/token';
-            },
-            logout: function() {
-                return 'https://auth.openshift.io/api/logout';
-            },
-            register: function() {
-                throw 'Not supported';
-            }
-        }
-
         var kc = this;
         var adapter;
         var refreshQueue = [];
@@ -30,6 +15,8 @@
             callbackList: [],
             interval: 5
         };
+
+        var useNonce = true;
 
         kc.init = function (initOptions) {
             kc.authenticated = false;
@@ -49,6 +36,10 @@
             }
 
             if (initOptions) {
+                if (typeof initOptions.useNonce !== 'undefined') {
+                    useNonce = initOptions.useNonce;
+                }
+
                 if (typeof initOptions.checkLoginIframe !== 'undefined') {
                     loginIframe.enable = initOptions.checkLoginIframe;
                 }
@@ -234,10 +225,12 @@
                 + '?client_id=' + encodeURIComponent(kc.clientId)
                 + '&redirect_uri=' + encodeURIComponent(redirectUri)
                 + '&state=' + encodeURIComponent(state)
-                + '&nonce=' + encodeURIComponent(nonce)
                 + '&response_mode=' + encodeURIComponent(kc.responseMode)
                 + '&response_type=' + encodeURIComponent(kc.responseType)
                 + '&scope=' + encodeURIComponent(scope);
+                if (useNonce) {
+                    url = url + '&nonce=' + encodeURIComponent(nonce);
+                }
 
             if (options && options.prompt) {
                 url += '&prompt=' + encodeURIComponent(options.prompt);
@@ -551,7 +544,7 @@
 
                 setToken(accessToken, refreshToken, idToken, timeLocal);
 
-                if (false && ((kc.tokenParsed && kc.tokenParsed.nonce != oauth.storedNonce) ||
+                if (useNonce && ((kc.tokenParsed && kc.tokenParsed.nonce != oauth.storedNonce) ||
                     (kc.refreshTokenParsed && kc.refreshTokenParsed.nonce != oauth.storedNonce) ||
                     (kc.idTokenParsed && kc.idTokenParsed.nonce != oauth.storedNonce))) {
 
@@ -598,7 +591,7 @@
                         }
                     };
                 } else {
-                    config.endpoints = {
+                    kc.endpoints = {
                         authorize: function() {
                             return oidcConfiguration.authorization_endpoint;
                         },
@@ -673,13 +666,14 @@
                     promise.setSuccess();
                 } else {
                     if (typeof oidcProvider === 'string') {
+                        var oidcProviderConfigUrl;
                         if (oidcProvider.charAt(oidcProvider.length - 1) == '/') {
-                            return oidcProvider + '/.well-known/openid-configuration';
+                            oidcProviderConfigUrl = oidcProvider + '.well-known/openid-configuration';
                         } else {
-                            return oidcProvider + '.well-known/openid-configuration';
+                            oidcProviderConfigUrl = oidcProvider + '/.well-known/openid-configuration';
                         }
                         var req = new XMLHttpRequest();
-                        req.open('GET', configUrl, true);
+                        req.open('GET', oidcProviderConfigUrl, true);
                         req.setRequestHeader('Accept', 'application/json');
 
                         req.onreadystatechange = function () {
@@ -697,6 +691,7 @@
                         req.send();
                     } else {
                         setupOidcEndoints(oidcProvider);
+                        promise.setSuccess();
                     }
                 }
             }
