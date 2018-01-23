@@ -37,7 +37,11 @@
 
             if (initOptions) {
                 if (typeof initOptions.useNonce !== 'undefined') {
-                    useNonce = initOptions.useNonce;
+                    if (typeof initOptions.useNonce == 'string') {
+                        useNonce = initOptions.useNonce.toLowerCase() == 'true';
+                    } else {
+                        useNonce = String(initOptions.useNonce) == 'true';
+                    }
                 }
 
                 if (typeof initOptions.checkLoginIframe !== 'undefined') {
